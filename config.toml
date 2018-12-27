@@ -1,5 +1,5 @@
-x`baseurl = "/"
-languageCode = "ko-KR"
+baseurl = "/"
+languageCode = "en-us"
 title = "A Hugo website"
 theme = "hugo-lithium"
 googleAnalytics = ""
