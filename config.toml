@@ -1,5 +1,5 @@
 baseurl = "/"
-languageCode = "en-us"
+languageCode = "ko-KR"
 title = "A Hugo website"
 theme = "hugo-lithium"
 googleAnalytics = ""
