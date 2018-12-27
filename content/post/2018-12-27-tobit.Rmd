@@ -1,0 +1,187 @@
+---
+title: "Tobit"
+author: "Soonhong Cho"
+output: html_document
+---
+
+# 1. Censored Data
+*censored data*를 다루는 하나의 방법인 *tobit regression*을 이해해보자. 데이터가 *censoring*되었다는 것은, 특히 연속형 종속변수가 특정한 기준점 이상/이하의 값을 취할 수 없는 경우를 의미한다. 가령, 미국의 Social Security Administration에 기록된 소득 데이터는 (2006년 기준) \$117,000 이하의 소득은 정확히 기록하고 있지만, \$117,000 이상의 소득은 \$117,000 으로 기록된다 (사회보장세의 최고 과세구간의 상한이 \$117,000이기 때문). 이 경우 소득 변수는 \$117,000 이상의 값을 취할 수 없다.\\
+*Tobit model*은 종속변수가 이렇게 *censored*되어있을 때 활용할 수 있다. Tobit model은 다음과 같은 간단한 선형 회귀 모형에서 시작한다.
+$$y_i^* ~\sim~ N(\mu_i,\sigma^2)$$
+and 
+$$\mu_i = \beta_0 + \sum_{k=1}^{K} \beta_k x_{ik}.$$
+위의 식에서 $y_i^*$는 일종의 잠재변수(latent variable)이며 실제로 관측되지는 않는다. 실제 관측한, *censored* 종속변수는 특정 상수값 이상 혹은 이하에서 정확히 관측되지 않고, 그 상수값보다 크거나 작다는 사실만 알 수 있다. 가령, $c$라는 알려진 상수보다 큰 값의 경우 ($y^*_i > c$) 우리는 오직 그 값이 $c$보다 크다는 사실($y^*_i > c$)만 알 수 있을 뿐, 정확한 값은 알 수 없다. 즉, 관측된 종속변수는 다음과 같이 표현된다.
+$$y_i = \begin{cases}  y^*_i & \mathrm{if}~y^*_i < c\\
+                       c    & \mathrm{otherwise}\end{cases}.$$
+
+# 2. Tobit & MLE
+
+## 2.1. Ordinary Least Square estimator
+
+가상의 데이터를 만들어서 분석해보면, *censored data*의 특성에 대해 더 잘 이해해볼 수 있을 것이다. 연구자가 소득에 대한 교육의 효과를 연구한다고 하자. 예를 쉽게 하기 위해, 다른 모든 통제변수는 제외하고 오로지 교육변수만 설명변수로 하는 선형모형을 가정하자. 교육을 처리집단과 통제집단에 랜덤으로 배정하는 실험을 하고, 각 개인의 현재 소득에 대한 자료를 갖고 있다. 즉 종속변수는 현재 소득, 유일한 독립변수는 교육 여부(dummy variable)이다. \\
+먼저, 가상의 *censored data*를 만들어내는 **cendata**라는 함수를 만든다. argument로 $c$를 포함시켜, 특정 $c$를 지정하면 그 이상의 값들은 $c$로 censoring되도록 만들어준다. 이 함수에서는 *xdist*라는 argument를 만들어서 독립변수가 어떠한 분포든 취할 수 있도록 허용한다.
+```{r }
+set.seed(2018)
+
+cendata <- function(n=1000, beta0=10, beta1=1, sigma2=0.7, c=c, x=NULL, xdist=rbinom) {
+  if (is.null(x)) {
+    x <- xdist(n, size=1, p=0.5)
+    x <- x/sd(x) # standardize to have sd of 1
+  }
+  eps <- rnorm(n, mean=0, sd=sqrt(sigma2)) # Transform eps to have std dev of sigma
+  y.star <- beta0 + beta1*x + eps
+  y <- ifelse(y.star<c, y.star, c) # right-censored at c
+  return( data.frame(y=y, x=x, eps=eps) )
+}
+```
+
+위의 함수가 제대로 작동하는지 실행해보고, 이 데이터를 OLS로 분석했을 때 어떤 문제가 생기는지 확인해보자.. $y$는 소득의 자연로그, $x$는 교육여부이고, 교육을 받을 확률은 50\%라고 가정하자 (p=0.5). 히스토그램을 그려 대략적 분포를 살펴보면, $c=12$에서 데이터가 쌓이는 것(stack)을 확인할 수 있다. (실제 2006년 미국의 Social Security Administration의 소득자료와 분포가 비슷해지도록 모수값을 설정하였다.) 또한 교육의 효과 ($\beta_1$)가 과소추정되었음을 확인할 수 있다 (우리가 설정한 실제 $\beta_1$.은 1이었다.) 만약 더 많은 양의 데이터가 *censoring*된다면 모수의 추정치는 더 편향될 것이다. 아래의 **dta.larger**는 그러한 데이터를 만든 것이고, bias가 더 커졌음을 알 수 있다.
+```{r}
+## try data
+n <- 1000
+x <- rbinom(n=n, size=1, p=0.5) # x is a treatment dummy variable here (education)
+dta <- cendata(n=1000,x=x,c=12) # censoring point (c) = 12
+hist(exp(dta$y), breaks = 50) # Suppose that y is ln(income). it seems like income distribution
+summary(lm(y~x, data=dta))
+```
+
+```{r}
+dta.larger <- cendata(n=1000,x=x,c=11)
+hist(exp(dta.larger$y), breaks = 50)
+summary(lm(y~x, data=dta.larger))$coef
+# lowing c -> more censoring occurs -> more biased estimates
+```
+
+## 2.2. Tobit
+OLS estimator는 *censored data*에 적합하지 않음을 ("biased estimator") 확인했으니, 이번에는 명시적으로 censoring을 고려하는 최대우도추정자(MLE, Maximum Likelihood Estimator)를 만들어보자. ML은 관측된 데이터를 토대로, 우리가 알고자 하는 모수를 추정하는(실제 갖고있는 데이터가 관측될 가능성이 가장 높은 모수의 집합을 찾아가는) 방법이다. 보통 데이터의 결합확률(joint probability)을 모수값들의 함수(이를 우도함수, likelihod function이라고 한다)로 놓고, 그 함수의 값을 최대로 만드는 모수값들을 찾는다. \\
+우리의 예에서 censored data의 $i$번째 관측자료의 우도함수는 다음과 같이 표현된다.
+$$ L_i(\beta_0,\beta_1) = \begin{cases} f(y_i;\mu_i,\sigma^2) & y_i < c\\
+                             1-F(c;\mu_i,\sigma^2) & y_i = c\\ \end{cases}$$
+여기서 $f$는 정규분포의 PDF, $F$는 정규분포의 CDF, $\mu_i = \beta_0 + \beta_1 x_i$이다. 왜 우도함수를 이렇게 만드는 것일까? 우선 데이터의 각 관측치(obseravtion)는 서로 독립적이라고 가정하기 때문에, 전체 우도함수는 각 관측치의 우도함수에 대한 기여(likelihood contribution)를 모두 곱한 것이다. 위의 식은 $i$번째 관측치가 전체 우도함수에 기여하는 정도를 표현한 식이다. 만약 해당 값이 censoring point인 $c$보다 작으면 그 값이 관측될 가능도는 정규분포의 확률밀도함수로 정의될 수 있다 (소득은 정규분포를 따른다고 가정하고, censoring되지 않는 정도의 소득은 정규분포에서 나왔다고 보는 것). 그러나 cesoring point인 $c$보다 더 큰 소득의 경우, 우리는 정확히 그 사람의 소득이 얼마인지 알 수 없다. 우리가 아는 것은 오직 이 값이 $c$보다는 크거나 같다는 사실 뿐이다. 이러한 관측값들은 제한된 정보만을 우리에게 제공하는 것이다. 그리고 그 제한된 정보를 반영하여, censoring된 관측값들의 우도함수에 대한 기여는 $c$보다 큰 값이 나올 확률($1-F(c;\mu_i,\sigma^2)$)로 계산한다. $L_i(\beta_0,\beta_1)$를 모두 곱한 전체 우도함수는 다음과 같이 표현된다.
+$$ L(\beta_0,\beta_1)= \underbrace{\prod\limits_{y_i<c}{f(y_i)}}_{uncensored} \times \underbrace{\prod\limits_{y_i=c}{(1-F(c))}}_{censored}$$
+
+\\
+ML 방법은 보통 계산의 편의성을 위하여 우도함수에 로그를 취한 log-likelihood function을 최대화하는 모수를 찾는다. $\theta=(\beta_0, \beta_1, \sigma)$ 세 모수를 포함하는 log-likelihood function은 다음과 같다.
+
+```{r cars}
+tobit.ll <- function(theta,y,x,c) {
+  b0 <- theta[1]
+  b1 <- theta[2]
+  sigma <- exp(theta[3]) # reparameterize because sigma>0
+  xb <- b0 + b1*x
+  cen <- sum(pnorm(y[y==c], mean=xb[y==c], sd=sigma, log=T, lower.tail=F))
+         # "lower.tail=F": it calculates 1-pnorm()
+  uncen <- sum(dnorm(y[y<c], mean=xb[y<c], sd=sigma, log=T))
+  return ( -(cen+uncen) ) # make it "minimization problem" for minimizer optim
+}
+```
+
+세 모수 중 우리가 관심있는 $\beta_1$의 값의 변화에 따라 log-likelihood 함수값이 어떻게 달라지는지 그래프를 통해 살펴보자 ($\beta_0$와 $\sigma$의 값은 실제 값에 고정시켰다). 로그우도함수를 최대화하는 값이 $\beta_1$의 MLE가 된다.
+
+```{r}
+library(ggplot2)
+suppressPackageStartupMessages(library(tidyverse))
+
+b1pts <- seq(-3,3,length=1000)
+llpts <- sapply(b1pts, 
+                function(m) 
+                  -(tobit.ll(c(10,m,log(sqrt(0.7))), y=dta$y, x=dta$x, c=12)))
+                  # fix b0 & sig2 at their true values and apply *(-1) to see orginal ll fun.
+b1pts[which.max(llpts)] # manually search for mle of beta_1
+
+ggplot(tibble(b1pts,llpts), aes(x=b1pts, y=llpts)) +
+  geom_line() +
+  ylab("Log-likelihood") + 
+  xlab("b1") +
+  theme_bw()
+```
+
+다음으로, 먼저 패키지를 활용하지 않고 위에서 만든 `tobit.ll` 함수를 활용하여 *tobit regression*을 실행시킬 수 있는 함수를 직접 만들어보자. 데이터로 $(x, y)$를 받고, $c$로 censoring point를 지정해준다. maximization을 위해 `optim`을 활용한다. 
+
+```{r}
+mytobit <- function(y, x, c){
+  tobit.ll <- function(theta,y,x,c) {
+    b0 <- theta[1]
+    b1 <- theta[2]
+    sigma <- exp(theta[3]) # reparameterize becase sigma>0
+    xb <- b0 + b1*x
+    cen <- sum(pnorm(y[y==c], mean=xb[y==c], sd=sigma, log=T, lower.tail=F))
+    uncen <- sum(dnorm(y[y<c], mean=xb[y<c], sd=sigma, log=T))
+    return ( -(cen+uncen) ) # make it "minimization problem" for minimizer optim
+  }
+  
+  ml.res <- optim( c(10,1,1), tobit.ll, y=y, x=x, c=c, hessian=TRUE)
+  # startvalues: theta = c(10,1,1)
+
+  est <- ml.res$par
+  se <- sqrt(diag(solve(ml.res$hessian)))
+  res <- as.matrix(cbind(est,se))
+  colnames(res) <- c("Estimate", "Std. Error")
+  rownames(res) <- c("b0", "b1", "log(sigma)")
+
+  return(res)
+}
+```
+제대로 작동하는지 확인하기 위해 `AER` 패키지의 `tobit`함수의 결과와 비교해보자.
+```{r}
+suppressPackageStartupMessages(library(AER))
+mytobit.aer <- function(y, x, c){
+  coef(summary(tobit(y~x,data=dta, left = -Inf, right = max(dta$y))))[1:3, 1:2]  
+}
+
+mytobit(y=dta$y, x=dta$x, c=12)
+mytobit.aer(y=dta$y, x=dta$x, c=12)
+```
+
+## 2.3 Sampling Distribution and Consistency of Estimator
+이 모델은 $\beta_1$의 일치추정량(consistent estimates)을 제공해주는가? 간단한 Monte Carlo Simulation을 통해 직접 $\hat{\beta_1}$의 표본분포(sampling distribution)을 살펴보고, sample size가 커짐에 따라 보다 정확한 추정을 할 수 있는지 확인해보자.
+
+```{r}
+simulate <- function(sims=1000,n=1000,c=c) {
+  results <- matrix(NA,sims,4) # container
+  colnames(results) <- c("b0","b1","se.b0","se.b1")
+  x <- rbinom(n, size=1, p=0.5) # generate random x
+  for (j in 1:sims) {
+    dta <- cendata(n=n, x=x, c=c) # pass c value for the simulation
+    res <- mytobit(y=dta$y, x=dta$x, c=c)
+    results[j,] <- c(res[1,1], res[2,1], res[1,2], res[2,2])
+  }
+  results
+}
+```
+
+```{r}
+sims=1000 # sims: # of sampling / n: # of obs. for each sampling
+sim.s <- simulate(sims=sims, n=10, c=12) # small N
+sim.l <- simulate(sims=sims, n=1000, c=12) # large N
+
+## Plot sampling distributions of beta1
+compare <- as.data.frame(cbind(sim.s[,2], sim.l[,2])) %>%
+        rename("10"=V1, "1000"=V2) %>%
+        gather(N, beta1)
+
+compare_mean <- compare %>%
+        group_by(N) %>%
+        summarise(Mean = mean(beta1), SD = sd(beta1))
+compare_mean # means for sim.s & sim.l
+
+ggplot(data=compare, aes(x=beta1, fill=N)) +
+      ggtitle("Sampling Distribution of beta1") +
+      theme(plot.title = element_text(hjust=0.5, size=20)) +
+      geom_density(alpha=0.5) +
+      geom_vline(data = compare_mean, linetype="dashed",
+                 aes(xintercept=Mean, color=N), size=1) +
+      xlim(-1, 3) +
+      facet_grid(N ~ .)
+```
+
+## 2.4 Degree of Censoring
+Censoring되는 데이터의 양이 많아지면, 즉 데이터가 주는 정보가 점점 더 적어지면 추정의 불확실성은 커져야 할 것이다. Tobit model은 그러한 특성을 가지고 있는지, 다시 한 번 Monte Carlo 시뮬레이션을 통해서 확인해보자. \\
+우리의 예는 특정 값($c$) 이상의 경우 censor되도록 설정하고 있으므로, $c$의 값을 점점 더 작게 할수록 censoring되는 데이터의 양은 많아질 것이다. $c$의 변화에 따라 $\beta_1$의 표준오차가 어떤 행태를 보이는지 시뮬레이션을 통해 알아보자.
+
+
+
+
+
+
+
