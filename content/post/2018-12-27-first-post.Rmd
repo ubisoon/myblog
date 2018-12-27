@@ -1,0 +1,12 @@
+---
+title: first post
+author: ubisoon
+date: '2018-12-27'
+slug: first-post
+categories:
+  - R
+tags:
+  - R Markdown
+---
+
+This is my first post.
