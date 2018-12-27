@@ -6,3 +6,5 @@ slug: first-post
 categories: []
 tags: []
 ---
+
+This is my first post.
