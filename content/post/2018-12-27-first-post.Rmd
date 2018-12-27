@@ -1,12 +1,10 @@
 ---
-title: first post
-author: ubisoon
+title: "first post"
+author: "ubisoon"
 date: '2018-12-27'
 slug: first-post
-categories:
-  - R
-tags:
-  - R Markdown
+tags: R Markdown
+categories: R
 ---
 
 # 1. Censored Data
