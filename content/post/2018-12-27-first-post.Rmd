@@ -3,10 +3,6 @@ title: first post
 author: ubisoon
 date: '2018-12-27'
 slug: first-post
-categories:
-  - R
-tags:
-  - R Markdown
+categories: []
+tags: []
 ---
-
-This is my first post.
